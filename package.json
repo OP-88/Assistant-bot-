@@ -1,0 +1,21 @@
+{
+  "name": "assistant",
+  "version": "1.0.0",
+  "description": "",
+  "main": "newsScheduler.js",
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OP-88/Assistant-bot-.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/OP-88/Assistant-bot-/issues"
+  },
+  "homepage": "https://github.com/OP-88/Assistant-bot-#readme"
+}

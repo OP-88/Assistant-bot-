@@ -1,7 +1,7 @@
 {
-  "name": "assistant-replier-bot",
+  "name": "assistant-agent-bot",
   "version": "1.0.0",
-  "description": "Telegram bot for WhatsApp auto-replies & engaging chit-chat with Openrouter",
+  "description": "Smart Telegram-WhatsApp AI agent with selective replies, news, reminders, and notifications",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
@@ -10,16 +10,17 @@
   "dependencies": {
     "telegraf": "^4.16.3",
     "whatsapp-web.js": "^1.23.2",
-    "openrouter": "^4.22.1",
+    "openai": "^4.22.1",
+    "axios": "^1.7.2",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "qrcode-terminal": "^0.12.0",
-    "puppeteer": "^21.5.2"
+    "node-cron": "^3.0.3"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
   },
-  "keywords": ["telegram", "whatsapp", "openrouter", "ai", "bot"],
+  "keywords": ["telegram", "whatsapp", "openrouter", "ai", "agent"],
   "author": "OP-88",
   "license": "MIT"
 }

@@ -2,111 +2,174 @@ require('dotenv').config();
 const { Telegraf } = require('telegraf');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const OpenRouter = require('openrouter');
+const OpenAI = require('openai');
 const express = require('express');
+const cron = require('node-cron');
+const newsHandler = require('./news');
 
-const openai = new OpenAI({ apiKey: process.env.OPENROUTER_API_KEY });
+const openrouter = new OpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1'
+});
 const telegramBot = new Telegraf(process.env.TELEGRAM_TOKEN);
+const waClient = new Client({ authStrategy: new LocalAuth() });
 
-// Simple in-memory storage for chat history (per user/group ID)
+// In-memory storage (user ID → history/reminders)
 const chatHistory = new Map();
-
-// Logger
+const reminders = new Map();
 const log = (msg) => console.log(`[${new Date().toISOString()}] ${msg}`);
 
 // Env validation
-if (!process.env.TELEGRAM_TOKEN || !process.env.OPENROUTER_API_KEY) {
-  log('ERROR: Missing TELEGRAM_TOKEN or OPENROUTER_API_KEY in .env');
+if (!process.env.TELEGRAM_TOKEN || !process.env.OPENROUTER_API_KEY || !process.env.NEWS_API_KEY) {
+  log('ERROR: Missing required env vars');
   process.exit(1);
 }
+const allowedNumbers = (process.env.ALLOWED_NUMBERS || '').split(',').map(n => n.trim());
 
-// AI Response Generator (shared for both platforms—context-aware)
+// AI Response Generator (context-aware, smart replies)
 async function generateAIResponse(userId, message, platform = 'whatsapp') {
   const history = chatHistory.get(userId) || [];
   history.push({ role: 'user', content: message });
-  // Keep last 5 exchanges to avoid token bloat
-  const recentHistory = history.slice(-10);
+
+  // Smart reply logic for meetings
+  let systemPrompt = `You are a smart assistant on ${platform}. Reply concisely and cleverly. If the message mentions a meeting (e.g., "we need to meet"), ask for time/location and promise to notify OP-88.`;
+  if (message.toLowerCase().includes('meet')) {
+    systemPrompt += ' For meeting requests, respond with: "Cool, when and where should we meet? I’ll notify OP-88 once you confirm!"';
+  }
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: process.env.OPENROUTER_MODEL || 'gpt-4o-mini',
+    const completion = await openrouter.chat.completions.create({
+      model: process.env.OPENROUTER_MODEL || 'meta-ai/llama-3.1-8b-instruct',
       messages: [
-        { role: 'system', content: `You are a fun, engaging assistant on ${platform}. Keep replies witty and concise to hold attention until a human arrives.` },
-        ...recentHistory
+        { role: 'system', content: systemPrompt },
+        ...history.slice(-10)
       ],
       max_tokens: 200,
-      temperature: 0.8,
+      temperature: 0.8
     });
 
-    const response = completion.choices[0]?.message?.content || 'Hmm, let me think...';
+    const response = completion.choices[0]?.message?.content || 'Thinking... try again!';
     history.push({ role: 'assistant', content: response });
     chatHistory.set(userId, history);
     return response;
   } catch (error) {
-    log(`OpenAI error for ${userId}: ${error.message}`);
-    return 'Oops, my brain short-circuited! Try again?';
+    log(`OpenRouter error for ${userId}: ${error.message}`);
+    return 'AI’s taking a nap—try again soon!';
   }
 }
 
-// WhatsApp Client Setup
-const waClient = new Client({ authStrategy: new LocalAuth() });
-
+// WhatsApp: Handle incoming messages
 waClient.on('qr', (qr) => {
   log('WhatsApp QR ready—scan it!');
   qrcode.generate(qr, { small: true });
 });
 
-waClient.on('ready', () => {
-  log('WhatsApp client ready—listening for messages!');
-});
+waClient.on('ready', () => log('WhatsApp client ready!'));
 
 waClient.on('message', async (msg) => {
-  if (msg.fromMe) return; // Ignore self
+  if (msg.fromMe) return;
   const userId = msg.from;
+  if (!allowedNumbers.includes(userId.split('@')[0])) {
+    log(`Ignored msg from ${userId} (not in ALLOWED_NUMBERS)`);
+    return;
+  }
+
   const response = await generateAIResponse(userId, msg.body, 'whatsapp');
   msg.reply(response);
   log(`WhatsApp reply to ${userId}: ${response.substring(0, 50)}...`);
+
+  // Notify Telegram (your admin chat)
+  telegramBot.telegram.sendMessage('YOUR_TELEGRAM_ADMIN_ID', `New WA msg from ${userId}: ${msg.body}\nReplied: ${response}`);
 });
 
-// Telegram Bot Setup
-telegramBot.start((ctx) => ctx.reply('Hey! I\'m your AI buddy—chat away to kill time. What\'s up?'));
-telegramBot.on('text', async (ctx) => {
-  const userId = ctx.from.id.toString();
-  const message = ctx.message.text;
-  const response = await generateAIResponse(userId, message, 'telegram');
+// Telegram: Commands & Engagement
+telegramBot.start((ctx) => ctx.reply('Hey! I’m your AI agent—chat, set reminders, or get news with /news!'));
 
+// News briefing
+telegramBot.command('news', async (ctx) => {
+  const news = await newsHandler.getNewsBrief();
+  ctx.reply(news);
+});
+
+// Reminder command (/reminder 1h Buy milk)
+telegramBot.command('reminder', (ctx) => {
+  const [_, time, ...noteParts] = ctx.message.text.split(' ');
+  const note = noteParts.join(' ');
+  if (!time || !note) return ctx.reply('Use: /reminder <time> <note>, e.g., /reminder 1h Buy milk');
+
+  const delay = parseTime(time);
+  if (!delay) return ctx.reply('Invalid time format! Use Xm, Xh, or Xd.');
+
+  const userId = ctx.from.id.toString();
+  reminders.set(`${userId}:${note}`, { time: Date.now() + delay, note });
+  ctx.reply(`Reminder set: "${note}" in ${time}`);
+});
+
+// Alarm command (/alarm 10m Wake up!)
+telegramBot.command('alarm', (ctx) => {
+  const [_, time, ...noteParts] = ctx.message.text.split(' ');
+  const note = noteParts.join(' ');
+  if (!time || !note) return ctx.reply('Use: /alarm <time> <note>, e.g., /alarm 10m Wake up!');
+
+  const delay = parseTime(time);
+  if (!delay) return ctx.reply('Invalid time format! Use Xm, Xh, or Xd.');
+
+  setTimeout(() => {
+    ctx.reply(`🔔 ALARM: ${note}`);
+    telegramBot.telegram.sendMessage('YOUR_TELEGRAM_ADMIN_ID', `Alarm triggered: ${note}`);
+  }, delay);
+  ctx.reply(`Alarm set: "${note}" in ${time}`);
+});
+
+// Parse time (e.g., 1h → 3600000ms)
+function parseTime(timeStr) {
+  const match = timeStr.match(/^(\d+)([mhd])$/);
+  if (!match) return null;
+  const [, value, unit] = match;
+  const num = parseInt(value);
+  return unit === 'm' ? num * 60 * 1000 : unit === 'h' ? num * 3600 * 1000 : num * 86400 * 1000;
+}
+
+// Handle Telegram chat
+telegramBot.on('text', async (ctx) => {
+  if (ctx.message.text.startsWith('/')) return; // Skip commands
+  const userId = ctx.from.id.toString();
+  const response = await generateAIResponse(userId, ctx.message.text, 'telegram');
   ctx.reply(response);
 
-  // "Keep busy" feature: After reply, set a timer for escalation
+  // Escalate after delay
   setTimeout(() => {
-    ctx.reply(`We've been chatting—want me to ping a human? (Say "yes" to escalate)`);
+    ctx.reply('Still here? Say "escalate" to ping OP-88!');
   }, parseInt(process.env.HUMAN_DELAY_MS) || 300000);
-
-  log(`Telegram reply to ${userId}: ${response.substring(0, 50)}...`);
 });
 
-// Optional: Forward WhatsApp msgs to Telegram group for human review (add your group ID)
-waClient.on('message', (msg) => {
-  if (!msg.fromMe) {
-    telegramBot.telegram.sendMessage('YOUR_TELEGRAM_GROUP_ID', `New WA msg from ${msg.from}: ${msg.body}`);
+// Check reminders (every minute)
+cron.schedule('* * * * *', () => {
+  const now = Date.now();
+  for (const [key, { time, note }] of reminders) {
+    if (now >= time) {
+      const userId = key.split(':')[0];
+      telegramBot.telegram.sendMessage(userId, `⏰ Reminder: ${note}`);
+      reminders.delete(key);
+    }
   }
 });
 
-// Error Handlers
+// Express server
+const app = express();
+app.get('/health', (req, res) => res.json({ status: 'alive', chats: chatHistory.size, reminders: reminders.size }));
+app.listen(process.env.PORT || 3000, () => log(`Server on port ${process.env.PORT || 3000}`));
+
+// Error handlers
 waClient.on('auth_failure', (msg) => log(`WhatsApp auth failed: ${msg}`));
 telegramBot.catch((err) => log(`Telegram error: ${err}`));
 process.on('unhandledRejection', (reason) => log(`Unhandled: ${reason}`));
 
-// Express Health Server (for monitoring/deployment)
-const app = express();
-app.get('/health', (req, res) => res.json({ status: 'alive', chats: chatHistory.size }));
-app.listen(process.env.PORT || 3000, () => log(`Server on port ${process.env.PORT || 3000}`));
-
-// Initialize
+// Start
 waClient.initialize();
 telegramBot.launch().then(() => log('Telegram bot launched!'));
 
-// Graceful shutdown
+// Shutdown
 process.once('SIGINT', () => {
   waClient.destroy();
   telegramBot.stop('SIGINT');

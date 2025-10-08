@@ -1,21 +1,25 @@
 {
-  "name": "assistant",
+  "name": "assistant-replier-bot",
   "version": "1.0.0",
-  "description": "",
-  "main": "newsScheduler.js",
-  "devDependencies": {},
+  "description": "Telegram bot for WhatsApp auto-replies & engaging chit-chat with Openrouter",
+  "main": "src/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/OP-88/Assistant-bot-.git"
+  "dependencies": {
+    "telegraf": "^4.16.3",
+    "whatsapp-web.js": "^1.23.2",
+    "openrouter": "^4.22.1",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "qrcode-terminal": "^0.12.0",
+    "puppeteer": "^21.5.2"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/OP-88/Assistant-bot-/issues"
+  "devDependencies": {
+    "nodemon": "^3.0.1"
   },
-  "homepage": "https://github.com/OP-88/Assistant-bot-#readme"
+  "keywords": ["telegram", "whatsapp", "openrouter", "ai", "bot"],
+  "author": "OP-88",
+  "license": "MIT"
 }

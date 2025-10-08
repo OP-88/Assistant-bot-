@@ -4,7 +4,7 @@ const cron = require('node-cron');
 
 // CONFIG
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const NEWS_API_URL = 'https://newsdata.io/api/1/news?apikey=pub_1d83b58c7ef64510a1fc26060a586749&country=ke,us,gb&language=en&category=top,technology,world,business,sports';
+const NEWS_API_URL = 'https://newsdata.io/api/1/news?apikey=pub_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&country=ke,us,gb&language=en&category=top,technology,world,business,sports';
 const START_HOUR = 6;
 const END_HOUR = 22;
 
